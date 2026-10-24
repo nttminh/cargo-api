@@ -1,0 +1,7 @@
+node_modules/
+dist/
+coverage/
+.env
+*.log
+tsconfig.tsbuildinfo
+k8s/overlays/*/secrets.env
