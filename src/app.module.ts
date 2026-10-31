@@ -11,6 +11,7 @@ import { buildDataSourceOptions } from './database/data-source';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { CustomersModule } from './modules/customers/customers.module';
 import { HealthModule } from './modules/health/health.module';
 
 @Module({
@@ -68,6 +69,7 @@ import { HealthModule } from './modules/health/health.module';
     }),
 
     HealthModule,
+    CustomersModule,
   ],
   providers: [
     // Order matters: rate-limit -> authenticate -> authorise.
