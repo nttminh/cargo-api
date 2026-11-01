@@ -11,6 +11,7 @@ import { buildDataSourceOptions } from './database/data-source';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { HealthModule } from './modules/health/health.module';
@@ -70,6 +71,7 @@ import { HealthModule } from './modules/health/health.module';
     }),
 
     HealthModule,
+    AuthModule,
     UsersModule,
     CustomersModule,
   ],
