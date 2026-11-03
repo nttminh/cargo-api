@@ -14,6 +14,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { CustomersModule } from './modules/customers/customers.module';
+import { LocationsModule } from './modules/locations/locations.module';
 import { HealthModule } from './modules/health/health.module';
 
 @Module({
@@ -74,6 +75,7 @@ import { HealthModule } from './modules/health/health.module';
     AuthModule,
     UsersModule,
     CustomersModule,
+    LocationsModule,
   ],
   providers: [
     // Order matters: rate-limit -> authenticate -> authorise.
