@@ -16,6 +16,7 @@ import { UsersModule } from './modules/users/users.module';
 import { CustomersModule } from './modules/customers/customers.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { CarriersModule } from './modules/carriers/carriers.module';
+import { ShipmentsModule } from './modules/shipments/shipments.module';
 import { HealthModule } from './modules/health/health.module';
 
 @Module({
@@ -78,6 +79,7 @@ import { HealthModule } from './modules/health/health.module';
     CustomersModule,
     LocationsModule,
     CarriersModule,
+    ShipmentsModule,
   ],
   providers: [
     // Order matters: rate-limit -> authenticate -> authorise.
