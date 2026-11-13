@@ -6,12 +6,13 @@ import { ShipmentContainer } from './entities/shipment-container.entity';
 import { TrackingEvent } from './entities/tracking-event.entity';
 import { ShipmentsService } from './shipments.service';
 import { ShipmentsController } from './shipments.controller';
+import { TrackingController } from './tracking.controller';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Shipment, ShipmentPackage, ShipmentContainer, TrackingEvent]),
   ],
-  controllers: [ShipmentsController],
+  controllers: [ShipmentsController, TrackingController],
   providers: [ShipmentsService],
   exports: [ShipmentsService],
 })
