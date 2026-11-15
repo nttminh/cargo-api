@@ -1,0 +1,17 @@
+node_modules
+dist
+coverage
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+*.log
+Dockerfile
+docker-compose*.yml
+k8s
+test
+README.md
+.vscode
+.idea
+tsconfig.tsbuildinfo
