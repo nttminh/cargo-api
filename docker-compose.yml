@@ -1,0 +1,70 @@
+# Local development stack: PostgreSQL + API (+ optional pgAdmin).
+#   docker compose up -d --build
+#   docker compose run --rm api node dist/database/seeds/run-seed.js
+# API:     http://localhost:3000/api/v1
+# Swagger: http://localhost:3000/api/v1/docs
+name: cargo
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-cargo}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-cargo_dev_password}
+      POSTGRES_DB: ${DB_NAME:-cargo}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    image: cargo-api:local
+    restart: unless-stopped
+    # Time between SIGTERM and SIGKILL; don't rely on the engine default.
+    stop_grace_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      API_PREFIX: api/v1
+      LOG_LEVEL: info
+      SWAGGER_ENABLED: "true"
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4200}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: ${DB_USERNAME:-cargo}
+      DB_PASSWORD: ${DB_PASSWORD:-cargo_dev_password}
+      DB_NAME: ${DB_NAME:-cargo}
+      # Fine for a single local instance; in Kubernetes migrations run in an advisory-locked initContainer.
+      DB_RUN_MIGRATIONS: "true"
+      JWT_SECRET: ${JWT_SECRET:-local-dev-only-secret-change-me-0123456789abcdef}
+      JWT_EXPIRES_IN: 1h
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@cargo.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-DevAdmin123!}
+      # Local stack only: lets the seed use the committed dev password despite NODE_ENV=production.
+      SEED_ALLOW_DEV_PASSWORD: "true"
+    ports:
+      - "3000:3000"
+
+  pgadmin:
+    image: dpage/pgadmin4:8.14
+    profiles: ["tools"]
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@cargo.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+
+volumes:
+  pgdata:
