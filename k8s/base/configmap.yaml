@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cargo-api-config
+data:
+  NODE_ENV: production
+  PORT: "3000"
+  API_PREFIX: api/v1
+  LOG_LEVEL: info
+  SWAGGER_ENABLED: "true"
+  CORS_ORIGINS: ""
+  DB_HOST: postgres
+  DB_PORT: "5432"
+  DB_NAME: cargo
+  DB_SSL: "false"
+  DB_POOL_MAX: "10"
+  DB_LOGGING: "false"
+  # Migrations run in the initContainer (advisory-locked), never in the app process.
+  DB_RUN_MIGRATIONS: "false"
+  JWT_EXPIRES_IN: 1h
+  THROTTLE_TTL_MS: "60000"
+  THROTTLE_LIMIT: "120"
