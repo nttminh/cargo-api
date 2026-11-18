@@ -1,0 +1,63 @@
+# Dev / local cluster (kind, minikube, Docker Desktop):
+#   docker build -t cargo-api:dev .
+#   kubectl apply -k k8s/overlays/dev
+#   kubectl -n cargo-dev port-forward svc/cargo-api 3000:80
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: cargo-dev
+
+resources:
+  - ../../base
+  - postgres.yaml
+
+images:
+  - name: cargo-api
+    newName: cargo-api
+    newTag: dev
+
+# Dev-only credentials. Never use these outside a local cluster.
+secretGenerator:
+  - name: cargo-api-secrets
+    literals:
+      - DB_USERNAME=cargo
+      - DB_PASSWORD=cargo_dev_password
+      - JWT_SECRET=dev-only-jwt-secret-0123456789abcdef0123456789
+      - SEED_ADMIN_EMAIL=admin@cargo.local
+      - SEED_ADMIN_PASSWORD=DevAdmin123!
+      - SEED_ALLOW_DEV_PASSWORD=true
+  - name: postgres-credentials
+    literals:
+      - POSTGRES_USER=cargo
+      - POSTGRES_PASSWORD=cargo_dev_password
+      - POSTGRES_DB=cargo
+
+configMapGenerator:
+  - name: cargo-api-config
+    behavior: merge
+    literals:
+      - LOG_LEVEL=debug
+      - CORS_ORIGINS=http://localhost:4200
+
+patches:
+  - target: { kind: Deployment, name: cargo-api }
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Never
+  - target: { kind: HorizontalPodAutoscaler, name: cargo-api }
+    patch: |
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxReplicas
+        value: 2
+  - target: { kind: PodDisruptionBudget, name: cargo-api }
+    patch: |
+      - op: replace
+        path: /spec/minAvailable
+        value: 0
