@@ -1,0 +1,62 @@
+# Production:
+#   cp k8s/overlays/prod/secrets.env.example k8s/overlays/prod/secrets.env   # fill in, never commit
+#   kustomize edit set image cargo-api=ghcr.io/your-org/cargo-api:<tag>     # (run inside this dir, from CI)
+#   kubectl apply -k k8s/overlays/prod
+#
+# Prefer an external secret manager (External Secrets Operator, Sealed Secrets, SOPS) over
+# secrets.env in real deployments; just make it produce a Secret named "cargo-api-secrets".
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: cargo
+
+resources:
+  - ../../base
+  - ingress.yaml
+
+images:
+  - name: cargo-api
+    newName: ghcr.io/your-org/cargo-api
+    newTag: "1.0.0"
+
+secretGenerator:
+  - name: cargo-api-secrets
+    envs:
+      - secrets.env
+
+configMapGenerator:
+  - name: cargo-api-config
+    behavior: merge
+    literals:
+      - DB_HOST=your-managed-postgres.example.internal
+      - DB_SSL=true
+      - DB_POOL_MAX=20
+      - SWAGGER_ENABLED=false
+      - CORS_ORIGINS=https://app.example.com
+
+patches:
+  - target: { kind: Deployment, name: cargo-api }
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 3
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests: { cpu: 250m, memory: 256Mi }
+          limits: { memory: 512Mi }
+  - target: { kind: HorizontalPodAutoscaler, name: cargo-api }
+    patch: |
+      - op: replace
+        path: /spec/minReplicas
+        value: 3
+      - op: replace
+        path: /spec/maxReplicas
+        value: 20
+  - target: { kind: PodDisruptionBudget, name: cargo-api }
+    patch: |
+      - op: remove
+        path: /spec/minAvailable
+      - op: add
+        path: /spec/maxUnavailable
+        value: 1
