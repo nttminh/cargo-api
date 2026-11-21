@@ -15,11 +15,11 @@ Backend for an **air & sea freight forwarder**, built with NestJS, PostgreSQL (T
 | **Validation** | ISO 6346 container check digits, IATA AWB mod-7 check, mode-consistent routing and carriers. |
 | **Status workflow** | Enforced state machine `DRAFT -> BOOKED -> RECEIVED -> DEPARTED -> IN_TRANSIT -> ARRIVED -> CUSTOMS_* -> OUT_FOR_DELIVERY -> DELIVERED` (+ `CANCELLED` before departure). Each change writes a tracking event. Booking data is locked after departure. |
 | **Public tracking** | `GET /api/v1/tracking/:number` by reference, HAWB/HBL or MAWB/MBL (in that order). No parties or values are exposed. A master document shared by several consolidated shipments returns `409` and asks for the reference or house number. |
-| **Ops** | Structured JSON logs with request ids, Helmet, CORS, rate limiting, consistent error envelope, Swagger, liveness/readiness probes, graceful shutdown. |
+| **Ops** | Structured JSON logs with request ids, Helmet, CORS, rate limiting, consistent error envelope, OpenAPI docs (Scalar), liveness/readiness probes, graceful shutdown. |
 
 ## API overview
 
-Base path `/api/v1`. Swagger UI at **`/api/v1/docs`** (disable with `SWAGGER_ENABLED=false`).
+Base path `/api/v1`. Interactive API reference (Scalar) at **`/api/v1/docs`**; the OpenAPI spec is at `/api/v1/docs-json` and `/api/v1/docs-yaml` (disable all three with `API_DOCS_ENABLED=false`).
 
 ```
 POST   /auth/login                      public, rate limited

@@ -10,7 +10,7 @@ export default () => ({
     .map((o) => o.trim())
     .filter(Boolean),
   logLevel: process.env.LOG_LEVEL ?? 'info',
-  swaggerEnabled: bool(process.env.SWAGGER_ENABLED, true),
+  apiDocsEnabled: bool(process.env.API_DOCS_ENABLED, true),
   database: {
     host: process.env.DB_HOST,
     port: parseInt(process.env.DB_PORT ?? '5432', 10),

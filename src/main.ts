@@ -1,12 +1,12 @@
 import { ClassSerializerInterceptor, RequestMethod, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory, Reflector } from '@nestjs/core';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Logger } from 'nestjs-pino';
 import helmet from 'helmet';
 import compression from 'compression';
 import { AppModule } from './app.module';
+import { setupApiDocs } from './docs/api-docs';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
@@ -18,21 +18,24 @@ async function bootstrap() {
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
 
-  app.use(helmet());
-  app.use(compression());
-  const origins = config.get<string[]>('corsOrigins', []);
-  app.enableCors({
-    origin: origins.length ? origins : false,
-    credentials: true,
-    exposedHeaders: ['x-request-id'],
-  });
-
+  // Set before the OpenAPI document is generated so its paths include the prefix.
   const prefix = config.get<string>('apiPrefix', 'api/v1');
   app.setGlobalPrefix(prefix, {
     exclude: [
       { path: 'health/live', method: RequestMethod.GET },
       { path: 'health/ready', method: RequestMethod.GET },
     ],
+  });
+
+  app.use(compression());
+  // Registered before helmet(): the docs page sets its own CSP for the Scalar bundle.
+  if (config.get<boolean>('apiDocsEnabled')) setupApiDocs(app, prefix);
+  app.use(helmet());
+  const origins = config.get<string[]>('corsOrigins', []);
+  app.enableCors({
+    origin: origins.length ? origins : false,
+    credentials: true,
+    exposedHeaders: ['x-request-id'],
   });
 
   app.useGlobalPipes(
@@ -44,20 +47,6 @@ async function bootstrap() {
     }),
   );
   app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
-
-  if (config.get<boolean>('swaggerEnabled')) {
-    const doc = new DocumentBuilder()
-      .setTitle('Cargo API')
-      .setDescription(
-        'Air & sea freight forwarding API: customers, airports/seaports, carriers, shipments, containers and tracking.',
-      )
-      .setVersion(process.env.npm_package_version ?? '1.0.0')
-      .addBearerAuth()
-      .build();
-    SwaggerModule.setup(`${prefix}/docs`, app, SwaggerModule.createDocument(app, doc), {
-      jsonDocumentUrl: `${prefix}/docs-json`,
-    });
-  }
 
   // SIGTERM from Kubernetes -> stop accepting connections, close DB pool, exit.
   app.enableShutdownHooks();

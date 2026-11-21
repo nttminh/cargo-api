@@ -2,7 +2,7 @@
 #   docker compose up -d --build
 #   docker compose run --rm api node dist/database/seeds/run-seed.js
 # API:     http://localhost:3000/api/v1
-# Swagger: http://localhost:3000/api/v1/docs
+# Docs:    http://localhost:3000/api/v1/docs
 name: cargo
 
 services:
@@ -37,7 +37,7 @@ services:
       PORT: 3000
       API_PREFIX: api/v1
       LOG_LEVEL: info
-      SWAGGER_ENABLED: "true"
+      API_DOCS_ENABLED: "true"
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4200}
       DB_HOST: postgres
       DB_PORT: 5432

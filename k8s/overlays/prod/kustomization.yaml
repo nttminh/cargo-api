@@ -31,7 +31,7 @@ configMapGenerator:
       - DB_HOST=your-managed-postgres.example.internal
       - DB_SSL=true
       - DB_POOL_MAX=20
-      - SWAGGER_ENABLED=false
+      - API_DOCS_ENABLED=false
       - CORS_ORIGINS=https://app.example.com
 
 patches:

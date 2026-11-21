@@ -7,7 +7,7 @@ data:
   PORT: "3000"
   API_PREFIX: api/v1
   LOG_LEVEL: info
-  SWAGGER_ENABLED: "true"
+  API_DOCS_ENABLED: "true"
   CORS_ORIGINS: ""
   DB_HOST: postgres
   DB_PORT: "5432"

@@ -3,5 +3,5 @@ dist/
 coverage/
 .env
 *.log
-tsconfig.tsbuildinfo
+*.tsbuildinfo
 k8s/overlays/*/secrets.env
