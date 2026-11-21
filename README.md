@@ -55,6 +55,9 @@ Log in as `admin@cargo.local` / `DevAdmin123!` at http://localhost:3000/api/v1/d
 
 ### Option B: Node on the host, Postgres in Docker
 
+Requires **Node.js 22** (see `.nvmrc`; e.g. `nvm install 22.23.5 && nvm use 22.23.5`). The Scalar docs
+integration does not load on Node 20.
+
 ```bash
 cp .env.example .env            # already done if you cloned this as-is
 docker compose up -d postgres

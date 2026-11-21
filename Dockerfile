@@ -3,7 +3,7 @@
 # Cargo API: multi-stage production image
 #   docker build -t cargo-api:latest .
 # ---------------------------------------------------------------------------
-ARG NODE_VERSION=20.18.1
+ARG NODE_VERSION=22.23.5
 
 # ---- deps: full dependency tree for building -------------------------------
 FROM node:${NODE_VERSION}-alpine AS deps
