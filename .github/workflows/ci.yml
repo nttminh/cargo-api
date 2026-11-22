@@ -1,0 +1,175 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch or PR cancels the run in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Shared by the e2e and image jobs; throwaway values for the CI database only.
+  DB_HOST: localhost
+  DB_PORT: 5432
+  DB_USERNAME: cargo
+  DB_PASSWORD: cargo_ci_password
+  DB_NAME: cargo
+  JWT_SECRET: ci-only-jwt-secret-not-used-anywhere-else-0123456789
+  SEED_ADMIN_EMAIL: admin@cargo.local
+  SEED_ADMIN_PASSWORD: DevAdmin123!
+
+jobs:
+  check:
+    name: Lint, type-check, unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npx tsc --noEmit -p tsconfig.json
+      - run: npm test -- --ci
+      - run: npm run build
+
+  e2e:
+    name: E2E tests (PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cargo
+          POSTGRES_PASSWORD: cargo_ci_password
+          POSTGRES_DB: cargo
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U cargo -d cargo"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      LOG_LEVEL: silent
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Run migrations
+        run: npm run migration:run
+      - name: Check entities match migrations
+        # Fails if an entity was changed without a matching migration.
+        run: npm run typeorm -- migration:generate src/database/migrations/PendingChanges --check
+      - name: Seed
+        run: npm run seed
+      - name: Seed again (must be idempotent)
+        run: npm run seed
+      - run: npm run test:e2e -- --ci
+
+  manifests:
+    name: Render Kubernetes manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Render dev overlay
+        run: kubectl kustomize k8s/overlays/dev > /dev/null
+      - name: Render prod overlay
+        run: |
+          cp k8s/overlays/prod/secrets.env.example k8s/overlays/prod/secrets.env
+          kubectl kustomize k8s/overlays/prod > /dev/null
+
+  image:
+    name: Docker image
+    needs: [check, e2e, manifests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cargo
+          POSTGRES_PASSWORD: cargo_ci_password
+          POSTGRES_DB: cargo
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U cargo -d cargo"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: cargo-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the image
+        # Starts the built image against the CI database: runs migrations on boot,
+        # then must report ready and serve the OpenAPI spec.
+        run: |
+          docker run -d --name api --network host \
+            -e NODE_ENV=production -e PORT=3000 -e LOG_LEVEL=warn \
+            -e DB_HOST -e DB_PORT -e DB_USERNAME -e DB_PASSWORD -e DB_NAME \
+            -e DB_RUN_MIGRATIONS=true -e JWT_SECRET -e API_DOCS_ENABLED=true \
+            cargo-api:ci
+          for _ in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/health/ready > /dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://localhost:3000/health/ready
+          curl -fsS -o /dev/null http://localhost:3000/api/v1/docs-json
+          test "$(docker inspect -f '{{.Config.User}}' cargo-api:ci)" = node
+
+      - name: Container logs
+        if: failure()
+        run: docker logs api || true
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
