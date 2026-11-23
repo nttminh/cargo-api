@@ -75,6 +75,19 @@ npm run test:e2e                # full flow, needs Postgres + migrations + seed
 npm run lint
 ```
 
+## CI
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every pull request and every push to `main`:
+
+| Job | What it checks |
+|---|---|
+| Lint, type-check, unit tests | ESLint/Prettier, `tsc`, Jest unit tests, `nest build` |
+| E2E tests | Against a real PostgreSQL 16: runs migrations, fails if an entity changed without a matching migration, seeds twice (must be idempotent), then the e2e suite |
+| Kubernetes manifests | Both kustomize overlays render |
+| Docker image | Builds the image, boots it against PostgreSQL (migrations on start) and checks `/health/ready`, the OpenAPI spec and the non-root user |
+
+On `main`, after all jobs pass, the image is pushed to `ghcr.io/nttminh/cargo-api` with tags `sha-<commit>` and `latest`. Pull requests build and test the image but never push it. Dependabot (`.github/dependabot.yml`) opens weekly update PRs for npm packages, GitHub Actions and the Docker base image.
+
 ## Database & migrations
 
 * Schema changes **only** via migrations (`synchronize` is off).
