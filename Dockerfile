@@ -21,6 +21,7 @@ RUN npm run build \
 # ---- runtime: minimal, non-root ---------------------------------------------
 FROM node:${NODE_VERSION}-alpine AS runtime
 ENV NODE_ENV=production \
+    TZ=UTC \
     PORT=3000 \
     NODE_OPTIONS="--enable-source-maps --max-old-space-size=384"
 WORKDIR /app

@@ -45,10 +45,12 @@ export class CreateLocationDto {
   @IsISO31661Alpha2()
   countryCode!: string;
 
-  @ApiPropertyOptional({ example: 'Asia/Ho_Chi_Minh' })
-  @IsOptional()
+  @ApiProperty({
+    example: 'Asia/Ho_Chi_Minh',
+    description: 'IANA time zone. ETD/ETA at this location are local to it.',
+  })
   @IsTimeZone()
-  timezone?: string;
+  timezone!: string;
 
   @ApiPropertyOptional()
   @IsOptional()

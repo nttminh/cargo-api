@@ -25,9 +25,9 @@ export class Location extends BaseEntity {
   @Column({ type: 'varchar', name: 'country_code', length: 2 })
   countryCode!: string;
 
-  /** IANA time zone, e.g. Asia/Ho_Chi_Minh */
-  @Column({ type: 'varchar', length: 64, nullable: true })
-  timezone!: string | null;
+  /** IANA time zone, e.g. Asia/Ho_Chi_Minh. Schedules at this location are local to it. */
+  @Column({ type: 'varchar', length: 64 })
+  timezone!: string;
 
   @Column({
     type: 'numeric',

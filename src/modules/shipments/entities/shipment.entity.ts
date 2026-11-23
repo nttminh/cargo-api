@@ -1,5 +1,8 @@
 import { Check, Column, Entity, Index, JoinColumn, ManyToOne, OneToMany } from 'typeorm';
+import { Exclude, Expose } from 'class-transformer';
 import { BaseEntity } from '../../../common/entities/base.entity';
+import { localTimestampTransformer } from '../../../common/time/local-timestamp.transformer';
+import { ZonedTime } from '../../../common/time/zoned-time';
 import { Incoterm, LoadType, ShipmentStatus, TransportMode } from '../../../common/enums';
 import { numericTransformer } from '../../../common/utils/numeric.transformer';
 import { Customer } from '../../customers/customer.entity';
@@ -22,6 +25,9 @@ export interface Party {
   taxId?: string;
 }
 
+const zoned = (local: string | null, timeZone: string | null, utc: Date | null) =>
+  local && timeZone && utc ? { local, timeZone, utc } : null;
+
 const num = (precision: number, scale: number, nullable = false) => ({
   type: 'numeric' as const,
   precision,
@@ -32,6 +38,14 @@ const num = (precision: number, scale: number, nullable = false) => ({
 
 @Entity('shipments')
 @Check('chk_shipments_route', '"origin_id" <> "destination_id"')
+@Check(
+  'chk_shipments_etd_complete',
+  '("etd_local" IS NULL) = ("etd_tz" IS NULL) AND ("etd_local" IS NULL) = ("etd_utc" IS NULL)',
+)
+@Check(
+  'chk_shipments_eta_complete',
+  '("eta_local" IS NULL) = ("eta_tz" IS NULL) AND ("eta_local" IS NULL) = ("eta_utc" IS NULL)',
+)
 @Index('ix_shipments_customer_created', ['customerId', 'createdAt'])
 @Index('ix_shipments_status', ['status'])
 @Index('ix_shipments_mode_status', ['mode', 'status'])
@@ -117,12 +131,69 @@ export class Shipment extends BaseEntity {
   @Column({ type: 'varchar', name: 'voyage_number', length: 20, nullable: true })
   voyageNumber!: string | null;
 
-  @Column({ type: 'timestamptz', nullable: true })
-  etd!: Date | null;
+  // ---- Schedule ------------------------------------------------------------
+  // ETD/ETA are planned local times at the port. The local time + IANA zone are the source of
+  // truth; *_utc is derived from them (for sorting/filtering) and recomputed if tz rules change.
+  @Exclude()
+  @Column({
+    name: 'etd_local',
+    type: 'timestamp',
+    nullable: true,
+    transformer: localTimestampTransformer,
+  })
+  etdLocal!: string | null;
 
-  @Column({ type: 'timestamptz', nullable: true })
-  eta!: Date | null;
+  @Exclude()
+  @Column({ name: 'etd_tz', type: 'varchar', length: 64, nullable: true })
+  etdTimeZone!: string | null;
 
+  @Exclude()
+  @Index('ix_shipments_etd_utc')
+  @Column({ name: 'etd_utc', type: 'timestamptz', nullable: true })
+  etdUtc!: Date | null;
+
+  @Exclude()
+  @Column({
+    name: 'eta_local',
+    type: 'timestamp',
+    nullable: true,
+    transformer: localTimestampTransformer,
+  })
+  etaLocal!: string | null;
+
+  @Exclude()
+  @Column({ name: 'eta_tz', type: 'varchar', length: 64, nullable: true })
+  etaTimeZone!: string | null;
+
+  @Exclude()
+  @Column({ name: 'eta_utc', type: 'timestamptz', nullable: true })
+  etaUtc!: Date | null;
+
+  /** Estimated time of departure, local to the origin port. */
+  @Expose()
+  get etd(): ZonedTime | null {
+    return zoned(this.etdLocal, this.etdTimeZone, this.etdUtc);
+  }
+
+  /** Estimated time of arrival, local to the destination port. */
+  @Expose()
+  get eta(): ZonedTime | null {
+    return zoned(this.etaLocal, this.etaTimeZone, this.etaUtc);
+  }
+
+  setEtd(t: ZonedTime | null) {
+    this.etdLocal = t?.local ?? null;
+    this.etdTimeZone = t?.timeZone ?? null;
+    this.etdUtc = t?.utc ?? null;
+  }
+
+  setEta(t: ZonedTime | null) {
+    this.etaLocal = t?.local ?? null;
+    this.etaTimeZone = t?.timeZone ?? null;
+    this.etaUtc = t?.utc ?? null;
+  }
+
+  // ---- Actuals (instants) --------------------------------------------------
   /** Actual time of departure */
   @Column({ type: 'timestamptz', nullable: true })
   atd!: Date | null;

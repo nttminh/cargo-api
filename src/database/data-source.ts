@@ -1,3 +1,4 @@
+import '../common/time/force-utc';
 import 'reflect-metadata';
 import { config as loadEnv } from 'dotenv';
 import { DataSource, DataSourceOptions } from 'typeorm';
@@ -29,7 +30,12 @@ export const buildDataSourceOptions = (): DataSourceOptions => ({
   synchronize: false,
   // gen_random_uuid() is built into PostgreSQL 13+, no extension needed.
   uuidExtension: 'pgcrypto',
-  extra: { max: parseInt(process.env.DB_POOL_MAX ?? '10', 10) },
+  extra: {
+    max: parseInt(process.env.DB_POOL_MAX ?? '10', 10),
+    // Session time zone UTC, so now()/date_trunc and timestamptz text output never depend on
+    // the database server's settings.
+    options: '-c timezone=UTC',
+  },
 });
 
 export default new DataSource(buildDataSourceOptions());

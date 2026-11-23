@@ -4,7 +4,6 @@ import {
   ArrayMinSize,
   IsArray,
   IsBoolean,
-  IsDate,
   IsEmail,
   IsEnum,
   IsISO31661Alpha2,
@@ -32,6 +31,7 @@ import {
 } from '../../../common/enums';
 import { PaginationQueryDto } from '../../../common/dto/pagination.dto';
 import { IsContainerNumber } from '../domain/validators';
+import { IsOptionalInstant, ScheduleTimeDto } from '../../../common/time/validation';
 
 const upper = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim().toUpperCase() : value;
@@ -202,8 +202,23 @@ export class CreateShipmentDto {
   @Length(1, 20)
   voyageNumber?: string;
 
-  @ApiPropertyOptional() @IsOptional() @Type(() => Date) @IsDate() etd?: Date;
-  @ApiPropertyOptional() @IsOptional() @Type(() => Date) @IsDate() eta?: Date;
+  @ApiPropertyOptional({
+    type: ScheduleTimeDto,
+    description: 'Estimated departure, local to the origin port. null clears it on update.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ScheduleTimeDto)
+  etd?: ScheduleTimeDto | null;
+
+  @ApiPropertyOptional({
+    type: ScheduleTimeDto,
+    description: 'Estimated arrival, local to the destination port. null clears it on update.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ScheduleTimeDto)
+  eta?: ScheduleTimeDto | null;
 
   @ApiProperty({ example: 'Garments, HS 6109' })
   @IsString()
@@ -273,8 +288,8 @@ export class ShipmentQueryDto extends PaginationQueryDto {
   @IsString()
   destination?: string;
 
-  @ApiPropertyOptional() @IsOptional() @Type(() => Date) @IsDate() etdFrom?: Date;
-  @ApiPropertyOptional() @IsOptional() @Type(() => Date) @IsDate() etdTo?: Date;
+  @IsOptionalInstant('ETD on or after this instant') etdFrom?: Date;
+  @IsOptionalInstant('ETD on or before this instant') etdTo?: Date;
 
   @ApiPropertyOptional({ enum: ['createdAt', 'etd', 'eta', 'reference'], default: 'createdAt' })
   @IsOptional()
@@ -304,11 +319,7 @@ export class UpdateStatusDto {
   @Length(1, 500)
   description?: string;
 
-  @ApiPropertyOptional({ description: 'Defaults to now' })
-  @IsOptional()
-  @Type(() => Date)
-  @IsDate()
-  occurredAt?: Date;
+  @IsOptionalInstant('Defaults to now') occurredAt?: Date;
 }
 
 export class CreateTrackingEventDto {
@@ -324,7 +335,7 @@ export class CreateTrackingEventDto {
 
   @ApiPropertyOptional() @IsOptional() @IsUUID() locationId?: string;
 
-  @ApiPropertyOptional() @IsOptional() @Type(() => Date) @IsDate() occurredAt?: Date;
+  @IsOptionalInstant('Defaults to now') occurredAt?: Date;
 
   @ApiPropertyOptional({ default: true })
   @IsOptional()

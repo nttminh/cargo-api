@@ -1,0 +1,49 @@
+# Re-derives the UTC instant of upcoming ETD/ETA values from their port-local time and IANA zone,
+# so schedules stay correct after a time zone rule change ships in a new image (new tzdata).
+# Cheap and idempotent: only rows whose UTC value changes are written.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cargo-api-recompute-schedules
+spec:
+  schedule: "17 3 * * 1" # Mondays 03:17 UTC
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            # Distinct from the API pods so the Service, PDB and HPA never select this pod.
+            app.kubernetes.io/name: cargo-api-recompute-schedules
+        spec:
+          restartPolicy: Never
+          serviceAccountName: cargo-api
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: recompute
+              image: cargo-api
+              command: ["node", "dist/database/recompute-schedules.js"]
+              envFrom:
+                - configMapRef:
+                    name: cargo-api-config
+                - secretRef:
+                    name: cargo-api-secrets
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { memory: 256Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]

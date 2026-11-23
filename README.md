@@ -10,7 +10,7 @@ Backend for an **air & sea freight forwarder**, built with NestJS, PostgreSQL (T
 | **Customers** | Shipper/consignee accounts (soft-deactivated, never hard-deleted). |
 | **Locations** | Airports (IATA `SGN`) and seaports (UN/LOCODE `VNSGN`). |
 | **Carriers** | Airlines (IATA code + AWB prefix) and ocean carriers (SCAC). |
-| **Shipments** | Air (`LOOSE`) and sea (`FCL`/`LCL`) shipments with packages, containers, parties, Incoterms, MAWB/HAWB or MBL/HBL, flight or vessel/voyage, ETD/ETA/ATD/ATA. |
+| **Shipments** | Air (`LOOSE`) and sea (`FCL`/`LCL`) shipments with packages, containers, parties, Incoterms, MAWB/HAWB or MBL/HBL, flight or vessel/voyage, ETD/ETA in port-local time (see [Dates and time zones](#dates-and-time-zones)), ATD/ATA. |
 | **Freight maths** | Air chargeable weight (IATA 1:6000, rounded up to 0.5 kg); sea W/M revenue tons (min 1). |
 | **Validation** | ISO 6346 container check digits, IATA AWB mod-7 check, mode-consistent routing and carriers. |
 | **Status workflow** | Enforced state machine `DRAFT -> BOOKED -> RECEIVED -> DEPARTED -> IN_TRANSIT -> ARRIVED -> CUSTOMS_* -> OUT_FOR_DELIVERY -> DELIVERED` (+ `CANCELLED` before departure). Each change writes a tracking event. Booking data is locked after departure. |
@@ -87,6 +87,26 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every pull request and every
 | Docker image | Builds the image, boots it against PostgreSQL (migrations on start) and checks `/health/ready`, the OpenAPI spec and the non-root user |
 
 On `main`, after all jobs pass, the image is pushed to `ghcr.io/nttminh/cargo-api` with tags `sha-<commit>` and `latest`. Pull requests build and test the image but never push it. Dependabot (`.github/dependabot.yml`) opens weekly update PRs for npm packages, GitHub Actions and the Docker base image.
+
+## Dates and time zones
+
+The API is used from many time zones, so times are handled in two different ways:
+
+**Instants** (things that happened or system times): `createdAt`, `updatedAt`, `lastLoginAt`, tracking `occurredAt`, `atd`, `ata`, `deliveredAt`.
+
+* Stored as `timestamptz` (UTC). Returned as ISO 8601 in UTC, e.g. `2026-12-01T07:30:00.000Z`.
+* Input must include an offset (`Z` or `+07:00`). A value without one is rejected with `400`, never read in the server's time zone.
+
+**Planned local times** (schedules agreed in the port's local time): `etd` (origin port) and `eta` (destination port).
+
+* Stored as three columns: `etd_local` (`timestamp`, the agreed wall-clock time and the source of truth), `etd_tz` (IANA zone, e.g. `Asia/Ho_Chi_Minh`) and `etd_utc` (`timestamptz`, derived, used for sorting and the `etdFrom`/`etdTo` filters). Same for `eta`.
+* Returned as `{ "local": "2026-12-01T14:30:00", "timeZone": "Asia/Ho_Chi_Minh", "utc": "2026-12-01T07:30:00.000Z" }`.
+* Send either `{ "local": "2026-12-01T14:30" }` (zone defaults to the port's; pass `timeZone` to override) or `{ "at": "2026-12-01T07:30:00Z" }` (converted to the port's local time). On update, `null` clears it.
+* Local times that don't exist (skipped when clocks spring forward) or happen twice (when clocks fall back) are rejected; send `at` with an explicit offset for the repeated hour.
+* Every location must have an IANA `timezone`.
+* If time zone rules change (new tzdata in a new Node image), the local time stays as agreed and its UTC instant is re-derived by `npm run schedules:recompute` (`node dist/database/recompute-schedules.js`). In Kubernetes the `cargo-api-recompute-schedules` CronJob runs it weekly.
+
+The process always runs in UTC (`src/common/time/force-utc.ts`, `TZ=UTC` in the image, database session `timezone=UTC`), so behaviour doesn't depend on the host.
 
 ## Database & migrations
 

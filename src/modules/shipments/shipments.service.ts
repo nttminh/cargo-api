@@ -39,6 +39,8 @@ import {
   UserRole,
 } from '../../common/enums';
 import { paginate, skipOf } from '../../common/dto/pagination.dto';
+import { ScheduleTimeDto } from '../../common/time/validation';
+import { fromInstant, fromLocal, ZonedTime, ZonedTimeError } from '../../common/time/zoned-time';
 
 /** Fields the shipment is validated against, whether new or merged with an update. */
 interface ShipmentDraft {
@@ -51,8 +53,6 @@ interface ShipmentDraft {
   flightNumber?: string | null;
   vesselName?: string | null;
   voyageNumber?: string | null;
-  etd?: Date | null;
-  eta?: Date | null;
   containers?: ContainerDto[] | null;
   currency?: string | null;
   declaredValue?: number | null;
@@ -70,6 +70,14 @@ const STATUS_DESCRIPTIONS: Record<ShipmentStatus, string> = {
   [ShipmentStatus.OUT_FOR_DELIVERY]: 'Out for delivery',
   [ShipmentStatus.DELIVERED]: 'Delivered',
   [ShipmentStatus.CANCELLED]: 'Shipment cancelled',
+};
+
+/** API sort keys -> entity properties (ETD/ETA sort by their UTC instant). */
+const SORT_COLUMNS: Record<ShipmentQueryDto['sortBy'], string> = {
+  createdAt: 'createdAt',
+  etd: 'etdUtc',
+  eta: 'etaUtc',
+  reference: 'reference',
 };
 
 @Injectable()
@@ -96,7 +104,10 @@ export class ShipmentsService {
 
       const loadType = this.resolveLoadType(dto.mode, dto.loadType);
       const draft: ShipmentDraft = { ...dto, loadType };
-      await this.validateDraft(em, draft);
+      const { origin, destination } = await this.validateDraft(em, draft);
+      const etd = this.resolveSchedule(dto.etd, origin, 'etd') ?? null;
+      const eta = this.resolveSchedule(dto.eta, destination, 'eta') ?? null;
+      this.assertScheduleOrder(etd, eta);
 
       const reference = await this.nextReference(em, dto.mode);
 
@@ -118,8 +129,6 @@ export class ShipmentsService {
         flightNumber: dto.flightNumber ?? null,
         vesselName: dto.vesselName ?? null,
         voyageNumber: dto.voyageNumber ?? null,
-        etd: dto.etd ?? null,
-        eta: dto.eta ?? null,
         commodityDescription: dto.commodityDescription,
         declaredValue: dto.declaredValue ?? null,
         currency: dto.currency ?? null,
@@ -130,6 +139,8 @@ export class ShipmentsService {
         packages: dto.packages.map((p) => this.toPackage(p)),
         containers: (dto.containers ?? []).map((c) => this.toContainer(c)),
       });
+      shipment.setEtd(etd);
+      shipment.setEta(eta);
       const saved = await em.save(shipment);
 
       await em.save(
@@ -182,16 +193,25 @@ export class ShipmentsService {
         flightNumber: dto.flightNumber ?? shipment.flightNumber,
         vesselName: dto.vesselName ?? shipment.vesselName,
         voyageNumber: dto.voyageNumber ?? shipment.voyageNumber,
-        etd: dto.etd ?? shipment.etd,
-        eta: dto.eta ?? shipment.eta,
         containers,
         currency: dto.currency ?? shipment.currency,
         declaredValue: dto.declaredValue ?? shipment.declaredValue,
       };
-      await this.validateDraft(em, merged);
+      const { origin, destination } = await this.validateDraft(em, merged);
+      const etd = this.resolveSchedule(dto.etd, origin, 'etd');
+      const eta = this.resolveSchedule(dto.eta, destination, 'eta');
+      this.assertScheduleOrder(
+        etd === undefined ? shipment.etd : etd,
+        eta === undefined ? shipment.eta : eta,
+      );
 
+      // etd/eta are applied through setEtd/setEta below, not copied as plain fields.
       const { packages, containers: newContainers, ...scalar } = dto;
+      delete scalar.etd;
+      delete scalar.eta;
       Object.assign(shipment, scalar, { loadType });
+      if (etd !== undefined) shipment.setEtd(etd);
+      if (eta !== undefined) shipment.setEta(eta);
       if (dto.masterDocumentNo) {
         shipment.masterDocumentNo = this.normalizeMasterDoc(shipment.mode, dto.masterDocumentNo);
       }
@@ -308,8 +328,8 @@ export class ShipmentsService {
     if (q.carrierId) qb.andWhere('s.carrierId = :carrierId', { carrierId: q.carrierId });
     if (q.origin) qb.andWhere('origin.code = :oc', { oc: q.origin });
     if (q.destination) qb.andWhere('destination.code = :dc', { dc: q.destination });
-    if (q.etdFrom) qb.andWhere('s.etd >= :etdFrom', { etdFrom: q.etdFrom });
-    if (q.etdTo) qb.andWhere('s.etd <= :etdTo', { etdTo: q.etdTo });
+    if (q.etdFrom) qb.andWhere('s.etdUtc >= :etdFrom', { etdFrom: q.etdFrom });
+    if (q.etdTo) qb.andWhere('s.etdUtc <= :etdTo', { etdTo: q.etdTo });
     if (q.search) {
       qb.andWhere(
         new Brackets((w) =>
@@ -324,7 +344,8 @@ export class ShipmentsService {
       );
     }
 
-    qb.orderBy(`s.${q.sortBy}`, q.sortOrder, 'NULLS LAST')
+    const sortColumn = SORT_COLUMNS[q.sortBy];
+    qb.orderBy(`s.${sortColumn}`, q.sortOrder, 'NULLS LAST')
       .addOrderBy('s.id', 'ASC')
       .skip(skipOf(q))
       .take(q.limit);
@@ -455,7 +476,10 @@ export class ShipmentsService {
     return requested ?? LoadType.LCL;
   }
 
-  private async validateDraft(em: EntityManager, d: ShipmentDraft) {
+  private async validateDraft(
+    em: EntityManager,
+    d: ShipmentDraft,
+  ): Promise<{ origin: Location; destination: Location }> {
     if (d.originId === d.destinationId) {
       throw new BadRequestException('Origin and destination must differ');
     }
@@ -518,9 +542,6 @@ export class ShipmentsService {
       }
     }
 
-    if (d.etd && d.eta && d.eta.getTime() < d.etd.getTime()) {
-      throw new BadRequestException('eta must be on or after etd');
-    }
     if (d.declaredValue != null && !d.currency) {
       throw new BadRequestException('currency is required when declaredValue is set');
     }
@@ -529,6 +550,38 @@ export class ShipmentsService {
       if (new Set(numbers).size !== numbers.length) {
         throw new BadRequestException('Duplicate container numbers');
       }
+    }
+    return { origin, destination };
+  }
+
+  /**
+   * Turns an ETD/ETA from the API into a ZonedTime at the port: undefined = not sent (keep),
+   * null = clear. The zone defaults to the port's IANA time zone.
+   */
+  private resolveSchedule(
+    input: ScheduleTimeDto | null | undefined,
+    port: Location,
+    field: 'etd' | 'eta',
+  ): ZonedTime | null | undefined {
+    if (input === undefined) return undefined;
+    if (input === null) return null;
+    if (input.local !== undefined && input.at !== undefined) {
+      throw new BadRequestException(`${field}: send either local or at, not both`);
+    }
+    const zone = input.timeZone ?? port.timezone;
+    try {
+      return input.at !== undefined
+        ? fromInstant(input.at, zone)
+        : fromLocal(input.local as string, zone);
+    } catch (e) {
+      if (e instanceof ZonedTimeError) throw new BadRequestException(`${field}: ${e.message}`);
+      throw e;
+    }
+  }
+
+  private assertScheduleOrder(etd: ZonedTime | null, eta: ZonedTime | null) {
+    if (etd && eta && eta.utc.getTime() < etd.utc.getTime()) {
+      throw new BadRequestException('eta must be on or after etd');
     }
   }
 

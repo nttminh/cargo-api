@@ -18,4 +18,5 @@ resources:
   - hpa.yaml
   - pdb.yaml
   - networkpolicy.yaml
+  - cronjob-recompute-schedules.yaml
 # The container image is set per overlay (`images:`); base uses the placeholder name "cargo-api".
