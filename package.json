@@ -35,7 +35,7 @@
     "schedules:recompute": "ts-node -r tsconfig-paths/register apps/shipments/src/database/recompute-schedules.ts"
   },
   "dependencies": {
-    "@nestjs/common": "^10.4.15",
+    "@nestjs/common": "^12.6.0",
     "@nestjs/config": "^3.3.0",
     "@nestjs/core": "^10.4.15",
     "@nestjs/jwt": "^10.2.0",
