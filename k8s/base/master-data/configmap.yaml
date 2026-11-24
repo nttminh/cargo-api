@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cargo-master-data-config
+data:
+  # This service's own database. Credentials are in the cargo-master-data-secrets Secret.
+  DB_HOST: postgres
+  DB_NAME: cargo_master_data

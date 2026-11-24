@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cargo-identity
+  labels:
+    app.kubernetes.io/name: cargo-identity
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cargo-identity
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

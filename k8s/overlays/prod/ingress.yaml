@@ -3,7 +3,7 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: cargo-api
+  name: cargo-gateway
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/proxy-body-size: 2m
@@ -21,6 +21,6 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: cargo-api
+                name: cargo-gateway
                 port:
                   name: http

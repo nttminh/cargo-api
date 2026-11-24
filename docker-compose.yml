@@ -1,59 +1,142 @@
-# Local development stack: PostgreSQL + API (+ optional pgAdmin).
+# Local stack: PostgreSQL (one database per service) + Kafka + the four services.
 #   docker compose up -d --build
-#   docker compose run --rm api node dist/database/seeds/run-seed.js
-# API:     http://localhost:3000/api/v1
+#   docker compose run --rm identity node dist/apps/identity/src/database/seed.js
+#   docker compose run --rm master-data node dist/apps/master-data/src/database/seed.js
+# API:     http://localhost:3000/api/v1        (gateway; the services are not exposed)
 # Docs:    http://localhost:3000/api/v1/docs
+# Infra only (to run the services with `npm run start:dev`): docker compose up -d postgres kafka
 name: cargo
+
+x-service: &service
+  restart: unless-stopped
+  # Time between SIGTERM and SIGKILL; don't rely on the engine default.
+  stop_grace_period: 30s
+
+x-common-env: &common-env
+  NODE_ENV: production
+  PORT: 3000
+  API_PREFIX: api/v1
+  LOG_LEVEL: info
+  API_DOCS_ENABLED: "true"
+  JWT_SECRET: ${JWT_SECRET:-local-dev-only-secret-change-me-0123456789abcdef}
+
+x-backend-env: &backend-env
+  <<: *common-env
+  DB_HOST: postgres
+  DB_PORT: 5432
+  # Fine for a single local instance; in Kubernetes migrations run in an advisory-locked initContainer.
+  DB_RUN_MIGRATIONS: "true"
+  KAFKA_BROKERS: kafka:29092
+
+x-backend-deps: &backend-deps
+  postgres:
+    condition: service_healthy
+  kafka:
+    condition: service_healthy
 
 services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${DB_USERNAME:-cargo}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-cargo_dev_password}
-      POSTGRES_DB: ${DB_NAME:-cargo}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_dev_password}
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pg-data:/var/lib/postgresql/data
+      # Creates cargo_identity, cargo_master_data and cargo_shipments, each with its own role.
+      - ./docker/postgres/init-databases.sql:/docker-entrypoint-initdb.d/init-databases.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 3s
       retries: 10
 
-  api:
-    build: .
-    image: cargo-api:local
+  kafka:
+    # Single-node KRaft broker (no ZooKeeper). Containers use kafka:29092, the host localhost:9092.
+    image: apache/kafka:4.1.1
     restart: unless-stopped
-    # Time between SIGTERM and SIGKILL; don't rely on the engine default.
-    stop_grace_period: 30s
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
-      NODE_ENV: production
-      PORT: 3000
-      API_PREFIX: api/v1
-      LOG_LEVEL: info
-      API_DOCS_ENABLED: "true"
+      # Fixed so the persisted log directory is reused across restarts.
+      CLUSTER_ID: Y2FyZ28tbG9jYWwta3JhZg
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_LISTENERS: INTERNAL://:29092,EXTERNAL://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Topics are created by the services with the right settings (compaction, partitions).
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
+
+  gateway:
+    <<: *service
+    build: { context: ., args: { APP: gateway } }
+    image: cargo-gateway:local
+    depends_on: [identity, master-data, shipments]
+    environment:
+      <<: *common-env
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:4200}
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_USERNAME: ${DB_USERNAME:-cargo}
-      DB_PASSWORD: ${DB_PASSWORD:-cargo_dev_password}
-      DB_NAME: ${DB_NAME:-cargo}
-      # Fine for a single local instance; in Kubernetes migrations run in an advisory-locked initContainer.
-      DB_RUN_MIGRATIONS: "true"
-      JWT_SECRET: ${JWT_SECRET:-local-dev-only-secret-change-me-0123456789abcdef}
+      IDENTITY_URL: http://identity:3000
+      MASTER_DATA_URL: http://master-data:3000
+      SHIPMENTS_URL: http://shipments:3000
+    ports:
+      - "3000:3000"
+
+  identity:
+    <<: *service
+    build: { context: ., args: { APP: identity } }
+    image: cargo-identity:local
+    depends_on: *backend-deps
+    environment:
+      <<: *backend-env
+      DB_USERNAME: identity
+      DB_PASSWORD: identity_dev_password
+      DB_NAME: cargo_identity
       JWT_EXPIRES_IN: 1h
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@cargo.local}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-DevAdmin123!}
       # Local stack only: lets the seed use the committed dev password despite NODE_ENV=production.
       SEED_ALLOW_DEV_PASSWORD: "true"
-    ports:
-      - "3000:3000"
+
+  master-data:
+    <<: *service
+    build: { context: ., args: { APP: master-data } }
+    image: cargo-master-data:local
+    depends_on: *backend-deps
+    environment:
+      <<: *backend-env
+      DB_USERNAME: master_data
+      DB_PASSWORD: master_data_dev_password
+      DB_NAME: cargo_master_data
+
+  shipments:
+    <<: *service
+    build: { context: ., args: { APP: shipments } }
+    image: cargo-shipments:local
+    depends_on: *backend-deps
+    environment:
+      <<: *backend-env
+      DB_USERNAME: shipments
+      DB_PASSWORD: shipments_dev_password
+      DB_NAME: cargo_shipments
 
   pgadmin:
     image: dpage/pgadmin4:8.14
@@ -67,4 +150,5 @@ services:
       - postgres
 
 volumes:
-  pgdata:
+  pg-data:
+  kafka-data:

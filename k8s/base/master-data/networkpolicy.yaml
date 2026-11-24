@@ -1,0 +1,35 @@
+# Only the gateway may call this service. Egress: DNS, its PostgreSQL database and Kafka.
+# Adjust the egress rules if your managed database or Kafka uses other ports.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cargo-master-data
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: cargo-master-data
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: cargo-gateway
+      ports:
+        - port: 3000
+          protocol: TCP
+  egress:
+    # DNS
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # PostgreSQL
+    - ports:
+        - port: 5432
+          protocol: TCP
+    # Kafka (9092 plaintext; 9093-9098 cover the usual TLS/SASL listeners of managed clusters)
+    - ports:
+        - port: 9092
+          endPort: 9098
+          protocol: TCP

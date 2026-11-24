@@ -1,0 +1,258 @@
+import { Check, Column, Entity, Index, JoinColumn, ManyToOne, OneToMany } from 'typeorm';
+import { Exclude, Expose } from 'class-transformer';
+import {
+  BaseEntity,
+  Incoterm,
+  LoadType,
+  localTimestampTransformer,
+  numericTransformer,
+  ShipmentStatus,
+  TransportMode,
+  ZonedTime,
+} from '@cargo/common';
+import { CarrierRef, CustomerRef, LocationRef } from '../../refs/refs.entities';
+import { ShipmentPackage } from './shipment-package.entity';
+import { ShipmentContainer } from './shipment-container.entity';
+import { TrackingEvent } from './tracking-event.entity';
+
+/** Shipper / consignee / notify party, stored as JSONB. */
+export interface Party {
+  name: string;
+  address?: string;
+  city?: string;
+  countryCode?: string;
+  contactName?: string;
+  phone?: string;
+  email?: string;
+  taxId?: string;
+}
+
+const zoned = (local: string | null, timeZone: string | null, utc: Date | null) =>
+  local && timeZone && utc ? { local, timeZone, utc } : null;
+
+const num = (precision: number, scale: number, nullable = false) => ({
+  type: 'numeric' as const,
+  precision,
+  scale,
+  nullable,
+  transformer: numericTransformer,
+});
+
+@Entity('shipments')
+@Check('chk_shipments_route', '"origin_id" <> "destination_id"')
+@Check(
+  'chk_shipments_etd_complete',
+  '("etd_local" IS NULL) = ("etd_tz" IS NULL) AND ("etd_local" IS NULL) = ("etd_utc" IS NULL)',
+)
+@Check(
+  'chk_shipments_eta_complete',
+  '("eta_local" IS NULL) = ("eta_tz" IS NULL) AND ("eta_local" IS NULL) = ("eta_utc" IS NULL)',
+)
+@Index('ix_shipments_customer_created', ['customerId', 'createdAt'])
+@Index('ix_shipments_status', ['status'])
+@Index('ix_shipments_mode_status', ['mode', 'status'])
+export class Shipment extends BaseEntity {
+  /** Human-friendly unique reference, e.g. AIR-2611-000042 */
+  @Index('uq_shipments_reference', { unique: true })
+  @Column({ type: 'varchar', length: 20 })
+  reference!: string;
+
+  @Column({ type: 'enum', enum: TransportMode, enumName: 'transport_mode' })
+  mode!: TransportMode;
+
+  @Column({ name: 'load_type', type: 'enum', enum: LoadType, enumName: 'load_type' })
+  loadType!: LoadType;
+
+  @Column({
+    type: 'enum',
+    enum: ShipmentStatus,
+    enumName: 'shipment_status',
+    default: ShipmentStatus.DRAFT,
+  })
+  status!: ShipmentStatus;
+
+  // ---- Parties -------------------------------------------------------------
+  // customer, origin, destination and carrier belong to master-data. Their ids are joined to the
+  // local replicas (refs) without foreign keys: replicas can be rebuilt from Kafka at any time.
+  @Column({ name: 'customer_id', type: 'uuid' })
+  customerId!: string;
+
+  @ManyToOne(() => CustomerRef, { createForeignKeyConstraints: false })
+  @JoinColumn({ name: 'customer_id' })
+  customer?: CustomerRef;
+
+  @Column({ type: 'jsonb' })
+  shipper!: Party;
+
+  @Column({ type: 'jsonb' })
+  consignee!: Party;
+
+  @Column({ name: 'notify_party', type: 'jsonb', nullable: true })
+  notifyParty!: Party | null;
+
+  // ---- Routing -------------------------------------------------------------
+  @Column({ name: 'origin_id', type: 'uuid' })
+  originId!: string;
+
+  @ManyToOne(() => LocationRef, { createForeignKeyConstraints: false })
+  @JoinColumn({ name: 'origin_id' })
+  origin?: LocationRef;
+
+  @Column({ name: 'destination_id', type: 'uuid' })
+  destinationId!: string;
+
+  @ManyToOne(() => LocationRef, { createForeignKeyConstraints: false })
+  @JoinColumn({ name: 'destination_id' })
+  destination?: LocationRef;
+
+  @Column({ name: 'carrier_id', type: 'uuid', nullable: true })
+  carrierId!: string | null;
+
+  @ManyToOne(() => CarrierRef, { nullable: true, createForeignKeyConstraints: false })
+  @JoinColumn({ name: 'carrier_id' })
+  carrier?: CarrierRef | null;
+
+  @Column({ type: 'enum', enum: Incoterm, enumName: 'incoterm', nullable: true })
+  incoterm!: Incoterm | null;
+
+  // ---- Transport documents & voyage ---------------------------------------
+  /** MAWB (air) or MBL (sea) */
+  @Index('ix_shipments_master_doc')
+  @Column({ type: 'varchar', name: 'master_document_no', length: 40, nullable: true })
+  masterDocumentNo!: string | null;
+
+  /** HAWB (air) or HBL (sea) */
+  @Index('ix_shipments_house_doc')
+  @Column({ type: 'varchar', name: 'house_document_no', length: 40, nullable: true })
+  houseDocumentNo!: string | null;
+
+  @Column({ type: 'varchar', name: 'flight_number', length: 10, nullable: true })
+  flightNumber!: string | null;
+
+  @Column({ type: 'varchar', name: 'vessel_name', length: 100, nullable: true })
+  vesselName!: string | null;
+
+  @Column({ type: 'varchar', name: 'voyage_number', length: 20, nullable: true })
+  voyageNumber!: string | null;
+
+  // ---- Schedule ------------------------------------------------------------
+  // ETD/ETA are planned local times at the port. The local time + IANA zone are the source of
+  // truth; *_utc is derived from them (for sorting/filtering) and recomputed if tz rules change.
+  @Exclude()
+  @Column({
+    name: 'etd_local',
+    type: 'timestamp',
+    nullable: true,
+    transformer: localTimestampTransformer,
+  })
+  etdLocal!: string | null;
+
+  @Exclude()
+  @Column({ name: 'etd_tz', type: 'varchar', length: 64, nullable: true })
+  etdTimeZone!: string | null;
+
+  @Exclude()
+  @Index('ix_shipments_etd_utc')
+  @Column({ name: 'etd_utc', type: 'timestamptz', nullable: true })
+  etdUtc!: Date | null;
+
+  @Exclude()
+  @Column({
+    name: 'eta_local',
+    type: 'timestamp',
+    nullable: true,
+    transformer: localTimestampTransformer,
+  })
+  etaLocal!: string | null;
+
+  @Exclude()
+  @Column({ name: 'eta_tz', type: 'varchar', length: 64, nullable: true })
+  etaTimeZone!: string | null;
+
+  @Exclude()
+  @Column({ name: 'eta_utc', type: 'timestamptz', nullable: true })
+  etaUtc!: Date | null;
+
+  /** Estimated time of departure, local to the origin port. */
+  @Expose()
+  get etd(): ZonedTime | null {
+    return zoned(this.etdLocal, this.etdTimeZone, this.etdUtc);
+  }
+
+  /** Estimated time of arrival, local to the destination port. */
+  @Expose()
+  get eta(): ZonedTime | null {
+    return zoned(this.etaLocal, this.etaTimeZone, this.etaUtc);
+  }
+
+  setEtd(t: ZonedTime | null) {
+    this.etdLocal = t?.local ?? null;
+    this.etdTimeZone = t?.timeZone ?? null;
+    this.etdUtc = t?.utc ?? null;
+  }
+
+  setEta(t: ZonedTime | null) {
+    this.etaLocal = t?.local ?? null;
+    this.etaTimeZone = t?.timeZone ?? null;
+    this.etaUtc = t?.utc ?? null;
+  }
+
+  // ---- Actuals (instants) --------------------------------------------------
+  /** Actual time of departure */
+  @Column({ type: 'timestamptz', nullable: true })
+  atd!: Date | null;
+
+  /** Actual time of arrival */
+  @Column({ type: 'timestamptz', nullable: true })
+  ata!: Date | null;
+
+  @Column({ name: 'delivered_at', type: 'timestamptz', nullable: true })
+  deliveredAt!: Date | null;
+
+  // ---- Cargo summary (derived from packages) -------------------------------
+  @Column({ type: 'varchar', name: 'commodity_description', length: 500 })
+  commodityDescription!: string;
+
+  @Column({ name: 'total_pieces', type: 'int', default: 0 })
+  totalPieces!: number;
+
+  @Column({ name: 'gross_weight_kg', ...num(12, 3), default: 0 })
+  grossWeightKg!: number;
+
+  @Column({ name: 'volume_cbm', ...num(12, 4), default: 0 })
+  volumeCbm!: number;
+
+  @Column({ name: 'chargeable_weight_kg', ...num(12, 3, true) })
+  chargeableWeightKg!: number | null;
+
+  @Column({ name: 'revenue_tons', ...num(12, 3, true) })
+  revenueTons!: number | null;
+
+  @Column({ name: 'is_hazardous', default: false })
+  isHazardous!: boolean;
+
+  @Column({ name: 'declared_value', ...num(14, 2, true) })
+  declaredValue!: number | null;
+
+  /** ISO 4217 */
+  @Column({ type: 'varchar', length: 3, nullable: true })
+  currency!: string | null;
+
+  @Column({ name: 'special_instructions', type: 'text', nullable: true })
+  specialInstructions!: string | null;
+
+  // ---- Children ------------------------------------------------------------
+  @OneToMany(() => ShipmentPackage, (p) => p.shipment, { cascade: true })
+  packages?: ShipmentPackage[];
+
+  @OneToMany(() => ShipmentContainer, (c) => c.shipment, { cascade: true })
+  containers?: ShipmentContainer[];
+
+  @OneToMany(() => TrackingEvent, (e) => e.shipment)
+  events?: TrackingEvent[];
+
+  // ---- Audit ---------------------------------------------------------------
+  /** User id from the access token (users belong to the identity service). */
+  @Column({ name: 'created_by_id', type: 'uuid', nullable: true })
+  createdById!: string | null;
+}

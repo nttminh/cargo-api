@@ -1,7 +1,9 @@
 # Dev / local cluster (kind, minikube, Docker Desktop):
-#   docker build -t cargo-api:dev .
+#   for app in gateway identity master-data shipments; do
+#     docker build --build-arg APP=$app -t cargo-$app:dev .     # kind: kind load docker-image cargo-$app:dev
+#   done
 #   kubectl apply -k k8s/overlays/dev
-#   kubectl -n cargo-dev port-forward svc/cargo-api 3000:80
+#   kubectl -n cargo-dev port-forward svc/cargo-gateway 3000:80
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -10,37 +12,57 @@ namespace: cargo-dev
 resources:
   - ../../base
   - postgres.yaml
+  - kafka.yaml
 
 images:
-  - name: cargo-api
-    newName: cargo-api
-    newTag: dev
+  - { name: cargo-gateway, newName: cargo-gateway, newTag: dev }
+  - { name: cargo-identity, newName: cargo-identity, newTag: dev }
+  - { name: cargo-master-data, newName: cargo-master-data, newTag: dev }
+  - { name: cargo-shipments, newName: cargo-shipments, newTag: dev }
+
+# Stable names, so the seed Jobs (kubectl create -f k8s/jobs/...) can reference them.
+# After changing a value: kubectl -n cargo-dev rollout restart deployment
+generatorOptions:
+  disableNameSuffixHash: true
 
 # Dev-only credentials. Never use these outside a local cluster.
 secretGenerator:
-  - name: cargo-api-secrets
+  - name: cargo-jwt
     literals:
-      - DB_USERNAME=cargo
-      - DB_PASSWORD=cargo_dev_password
       - JWT_SECRET=dev-only-jwt-secret-0123456789abcdef0123456789
+  - name: cargo-identity-secrets
+    literals:
+      - DB_USERNAME=identity
+      - DB_PASSWORD=identity_dev_password
       - SEED_ADMIN_EMAIL=admin@cargo.local
       - SEED_ADMIN_PASSWORD=DevAdmin123!
       - SEED_ALLOW_DEV_PASSWORD=true
+  - name: cargo-master-data-secrets
+    literals:
+      - DB_USERNAME=master_data
+      - DB_PASSWORD=master_data_dev_password
+  - name: cargo-shipments-secrets
+    literals:
+      - DB_USERNAME=shipments
+      - DB_PASSWORD=shipments_dev_password
   - name: postgres-credentials
     literals:
-      - POSTGRES_USER=cargo
-      - POSTGRES_PASSWORD=cargo_dev_password
-      - POSTGRES_DB=cargo
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres_dev_password
+      - POSTGRES_DB=postgres
 
 configMapGenerator:
-  - name: cargo-api-config
+  - name: cargo-config
     behavior: merge
     literals:
       - LOG_LEVEL=debug
+  - name: cargo-gateway-config
+    behavior: merge
+    literals:
       - CORS_ORIGINS=http://localhost:4200
 
 patches:
-  - target: { kind: Deployment, name: cargo-api }
+  - target: { kind: Deployment, labelSelector: "app.kubernetes.io/part-of=cargo" }
     patch: |
       - op: replace
         path: /spec/replicas
@@ -48,7 +70,7 @@ patches:
       - op: replace
         path: /spec/template/spec/containers/0/imagePullPolicy
         value: Never
-  - target: { kind: HorizontalPodAutoscaler, name: cargo-api }
+  - target: { kind: HorizontalPodAutoscaler }
     patch: |
       - op: replace
         path: /spec/minReplicas
@@ -56,7 +78,7 @@ patches:
       - op: replace
         path: /spec/maxReplicas
         value: 2
-  - target: { kind: PodDisruptionBudget, name: cargo-api }
+  - target: { kind: PodDisruptionBudget }
     patch: |
       - op: replace
         path: /spec/minAvailable
