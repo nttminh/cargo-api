@@ -1,22 +1,22 @@
+# Settings shared by every service. Each service also has its own ConfigMap (cargo-<service>-config).
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: cargo-api-config
+  name: cargo-config
 data:
   NODE_ENV: production
   PORT: "3000"
   API_PREFIX: api/v1
   LOG_LEVEL: info
   API_DOCS_ENABLED: "true"
-  CORS_ORIGINS: ""
-  DB_HOST: postgres
+  JWT_EXPIRES_IN: 1h
   DB_PORT: "5432"
-  DB_NAME: cargo
   DB_SSL: "false"
   DB_POOL_MAX: "10"
   DB_LOGGING: "false"
   # Migrations run in the initContainer (advisory-locked), never in the app process.
   DB_RUN_MIGRATIONS: "false"
-  JWT_EXPIRES_IN: 1h
-  THROTTLE_TTL_MS: "60000"
-  THROTTLE_LIMIT: "120"
+  KAFKA_BROKERS: kafka:9092
+  KAFKA_SSL: "false"
+  KAFKA_TOPIC_PARTITIONS: "3"
+  KAFKA_TOPIC_REPLICATION_FACTOR: "1"

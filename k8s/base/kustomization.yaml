@@ -1,3 +1,9 @@
+# Four services, each with its own Deployment, Service, HPA, PDB and NetworkPolicy:
+#   gateway      public entry point (Ingress -> cargo-gateway)
+#   identity     users, login             -> its own database
+#   master-data  customers, locations...  -> its own database, publishes to Kafka
+#   shipments    shipments, tracking      -> its own database, consumes/publishes Kafka
+# Images are set per overlay (`images:`); base uses the placeholder names cargo-<service>.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -5,7 +11,6 @@ namespace: cargo
 
 labels:
   - pairs:
-      app.kubernetes.io/name: cargo-api
       app.kubernetes.io/part-of: cargo
     includeSelectors: false
 
@@ -13,10 +18,29 @@ resources:
   - namespace.yaml
   - serviceaccount.yaml
   - configmap.yaml
-  - deployment.yaml
-  - service.yaml
-  - hpa.yaml
-  - pdb.yaml
-  - networkpolicy.yaml
-  - cronjob-recompute-schedules.yaml
-# The container image is set per overlay (`images:`); base uses the placeholder name "cargo-api".
+  - jobs-networkpolicy.yaml
+  - gateway/configmap.yaml
+  - gateway/deployment.yaml
+  - gateway/service.yaml
+  - gateway/hpa.yaml
+  - gateway/pdb.yaml
+  - gateway/networkpolicy.yaml
+  - identity/configmap.yaml
+  - identity/deployment.yaml
+  - identity/service.yaml
+  - identity/hpa.yaml
+  - identity/pdb.yaml
+  - identity/networkpolicy.yaml
+  - master-data/configmap.yaml
+  - master-data/deployment.yaml
+  - master-data/service.yaml
+  - master-data/hpa.yaml
+  - master-data/pdb.yaml
+  - master-data/networkpolicy.yaml
+  - shipments/configmap.yaml
+  - shipments/deployment.yaml
+  - shipments/service.yaml
+  - shipments/hpa.yaml
+  - shipments/pdb.yaml
+  - shipments/networkpolicy.yaml
+  - shipments/cronjob-recompute-schedules.yaml

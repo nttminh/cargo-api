@@ -1,0 +1,20 @@
+# One-off and scheduled jobs (seed, schedule recompute): no inbound traffic; DNS, PostgreSQL and
+# Kafka out (the master-data seed publishes through the outbox table, Kafka is optional).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: cargo-jobs
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: job
+  policyTypes: ["Ingress", "Egress"]
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - ports:
+        - port: 5432
+          protocol: TCP

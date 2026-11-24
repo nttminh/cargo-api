@@ -1,10 +1,11 @@
 # Production:
-#   cp k8s/overlays/prod/secrets.env.example k8s/overlays/prod/secrets.env   # fill in, never commit
-#   kustomize edit set image cargo-api=ghcr.io/your-org/cargo-api:<tag>     # (run inside this dir, from CI)
+#   for f in k8s/overlays/prod/secrets/*.env.example; do cp "$f" "${f%.example}"; done   # fill in, never commit
+#   cd k8s/overlays/prod && kustomize edit set image \
+#     cargo-gateway=ghcr.io/nttminh/cargo-gateway:sha-<commit> ...                       # (from CI)
 #   kubectl apply -k k8s/overlays/prod
 #
 # Prefer an external secret manager (External Secrets Operator, Sealed Secrets, SOPS) over
-# secrets.env in real deployments; just make it produce a Secret named "cargo-api-secrets".
+# the secrets/*.env files in real deployments; just make it produce Secrets with the same names.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -14,28 +15,63 @@ resources:
   - ../../base
   - ingress.yaml
 
+# Pin each service to the sha-<commit> tag CI published (latest is only a starting point).
 images:
-  - name: cargo-api
-    newName: ghcr.io/your-org/cargo-api
-    newTag: "1.0.0"
+  - { name: cargo-gateway, newName: ghcr.io/nttminh/cargo-gateway, newTag: latest }
+  - { name: cargo-identity, newName: ghcr.io/nttminh/cargo-identity, newTag: latest }
+  - { name: cargo-master-data, newName: ghcr.io/nttminh/cargo-master-data, newTag: latest }
+  - { name: cargo-shipments, newName: ghcr.io/nttminh/cargo-shipments, newTag: latest }
+
+# Stable names, so the seed Jobs (kubectl create -f k8s/jobs/...) can reference them.
+# After changing a value: kubectl -n cargo rollout restart deployment
+generatorOptions:
+  disableNameSuffixHash: true
 
 secretGenerator:
-  - name: cargo-api-secrets
-    envs:
-      - secrets.env
+  - name: cargo-jwt
+    envs: [secrets/jwt.env]
+  - name: cargo-kafka
+    envs: [secrets/kafka.env]
+  - name: cargo-identity-secrets
+    envs: [secrets/identity.env]
+  - name: cargo-master-data-secrets
+    envs: [secrets/master-data.env]
+  - name: cargo-shipments-secrets
+    envs: [secrets/shipments.env]
 
 configMapGenerator:
-  - name: cargo-api-config
+  - name: cargo-config
     behavior: merge
     literals:
-      - DB_HOST=your-managed-postgres.example.internal
+      - API_DOCS_ENABLED=false
       - DB_SSL=true
       - DB_POOL_MAX=20
-      - API_DOCS_ENABLED=false
+      # Managed Kafka (MSK, Confluent Cloud, ...): TLS + SASL; credentials in secrets/kafka.env.
+      - KAFKA_BROKERS=your-kafka-bootstrap.example.internal:9096
+      - KAFKA_SSL=true
+      - KAFKA_SASL_MECHANISM=scram-sha-512
+      - KAFKA_TOPIC_REPLICATION_FACTOR=3
+      - KAFKA_TOPIC_PARTITIONS=6
+  - name: cargo-gateway-config
+    behavior: merge
+    literals:
       - CORS_ORIGINS=https://app.example.com
+  # One database per service (separate instances, or at least separate databases and roles).
+  - name: cargo-identity-config
+    behavior: merge
+    literals:
+      - DB_HOST=identity-db.example.internal
+  - name: cargo-master-data-config
+    behavior: merge
+    literals:
+      - DB_HOST=master-data-db.example.internal
+  - name: cargo-shipments-config
+    behavior: merge
+    literals:
+      - DB_HOST=shipments-db.example.internal
 
 patches:
-  - target: { kind: Deployment, name: cargo-api }
+  - target: { kind: Deployment, labelSelector: "app.kubernetes.io/part-of=cargo" }
     patch: |
       - op: replace
         path: /spec/replicas
@@ -45,7 +81,7 @@ patches:
         value:
           requests: { cpu: 250m, memory: 256Mi }
           limits: { memory: 512Mi }
-  - target: { kind: HorizontalPodAutoscaler, name: cargo-api }
+  - target: { kind: HorizontalPodAutoscaler }
     patch: |
       - op: replace
         path: /spec/minReplicas
@@ -53,7 +89,7 @@ patches:
       - op: replace
         path: /spec/maxReplicas
         value: 20
-  - target: { kind: PodDisruptionBudget, name: cargo-api }
+  - target: { kind: PodDisruptionBudget }
     patch: |
       - op: remove
         path: /spec/minAvailable

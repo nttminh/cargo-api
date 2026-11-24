@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cargo-gateway-config
+data:
+  CORS_ORIGINS: ""
+  THROTTLE_TTL_MS: "60000"
+  THROTTLE_LIMIT: "120"
+  IDENTITY_URL: http://cargo-identity
+  MASTER_DATA_URL: http://cargo-master-data
+  SHIPMENTS_URL: http://cargo-shipments
+  UPSTREAM_TIMEOUT_MS: "30000"

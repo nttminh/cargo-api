@@ -18,7 +18,13 @@
     "strictBindCallApply": true,
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "paths": {
+      "@cargo/common": ["libs/common/src"],
+      "@cargo/common/*": ["libs/common/src/*"],
+      "@cargo/messaging": ["libs/messaging/src"],
+      "@cargo/messaging/*": ["libs/messaging/src/*"]
+    }
   },
-  "include": ["src/**/*", "test/**/*"]
+  "include": ["apps/**/*", "libs/**/*", "test/**/*"]
 }

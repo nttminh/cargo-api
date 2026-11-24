@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cargo-shipments
+  labels:
+    app.kubernetes.io/name: cargo-shipments
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cargo-shipments
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
